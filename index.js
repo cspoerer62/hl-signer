@@ -1,3 +1,13 @@
 const express = require('express');
 const { ethers } = require('ethers');
 const msgpack = require('@msgpack/msgpack');
+const app = express();
+app.use(express.json());
+const PRIVATE_KEY = process.env.PRIVATE_KEY;
+const wallet = new ethers.Wallet(PRIVATE_KEY);
+const EIP712_DOMAIN = { name: 'Exchange', version: '1', chainId: 1337, verifyingContract: '0x0000000000000000000000000000000000000000' };
+const AGENT_TYPES = { Agent: [{ name: 'source', type: 'string' }, { name: 'connectionId', type: 'bytes32' }] };
+app.get('/health', (req, res) => { res.json({ status: 'ok', address: wallet.address }); });
+app.post('/sign', async (req, res) => { try { const { types, message } = req.body; const sig = await wallet.signTypedData(EIP712_DOMAIN, types, message); const { r, s, v } = ethers.Signature.from(sig); res.json({ signature: sig, r, s, v: Number(v) }); } catch (e) { res.status(500).json({ error: e.message }); } });
+app.post('/sign_l1', async (req, res) => { try { const { action, nonce, vaultAddress } = req.body; const ab = msgpack.encode(action); const nb = Buffer.alloc(8); nb.writeBigUInt64LE(BigInt(nonce)); let payload; if (vaultAddress) { payload = Buffer.concat([ab, nb, Buffer.from([1]), Buffer.from(vaultAddress.replace('0x',''),'hex')]); } else { payload = Buffer.concat([ab, nb, Buffer.from([0])]); } const cid = ethers.keccak256(payload); const sig = await wallet.signTypedData(EIP712_DOMAIN, AGENT_TYPES, { source: 'a', connectionId: cid }); const { r, s, v } = ethers.Signature.from(sig); res.json({ signature: sig, r, s, v: Number(v), connectionId: cid }); } catch (e) { res.status(500).json({ error: e.message }); } });
+app.listen(process.env.PORT || 3000);
